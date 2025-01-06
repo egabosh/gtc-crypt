@@ -11,7 +11,7 @@
 
     - name: gtc-crypt
       ansible.builtin.get_url:
-        url: 
+        url: https://raw.githubusercontent.com/egabosh/gtc-crypt/refs/heads/main/gtc-crypt
         dest: /usr/local/bin/gtc-crypt
         owner: root
         group: root
