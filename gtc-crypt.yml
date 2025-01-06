@@ -1,0 +1,19 @@
+---
+- name: gtc-crypt
+  hosts: all
+  tasks:
+    - name: Install gtc-crypt dependencies
+      apt:
+        name:
+          - perl
+          - libcrypt-cbc-perl
+          - libfile-mimeinfo-perl
+
+    - name: gtc-crypt
+      ansible.builtin.get_url:
+        url: 
+        dest: /usr/local/bin/gtc-crypt
+        owner: root
+        group: root
+        mode: '0555'
+        backup: yes

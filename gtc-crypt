@@ -1,0 +1,164 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Getopt::Std;
+
+use vars qw/*opt_h *opt_a *opt_p *opt_r *opt_d *opt_b/;
+# ==== Parse the commandline ====
+$opt_h="";
+$opt_a="";
+$opt_p="";
+$opt_r="";
+$opt_d="";
+$opt_b="";
+getopts('ha:prdb');
+# Run help/usage?
+usage() if ($opt_h);
+
+my $alias="";
+if ($opt_a) {
+ if ($opt_a=~/[ \:\n]/) {
+  print "ERROR: newlines, : or spaces are not supported in the alias\n";
+  exit 1;
+ }
+ else {
+  $alias=$opt_a;
+ }
+}
+else {
+ unless ($opt_d) {
+  print "ERROR: No alias (-a) specified\n\n";
+  usage();
+ }
+}
+
+unless ($ENV{HOME}) {
+ my $user=`whoami`;
+ chomp($user);
+ $ENV{HOME}=`getent passwd $user | cut -d: -f6`;
+ chomp($ENV{HOME});
+}
+# Get or encrypt the key
+mkdir($ENV{HOME} . "/.gtc-crypt",0700) unless ( -d $ENV{HOME} . "/.gtc-crypt" );
+# Get the key if it is existing
+my $key;
+if (-f "$ENV{HOME}/.gtc-crypt/.key") {
+ open(KEY, "<$ENV{HOME}/.gtc-crypt/.key") || die "Could not open the keyfile $ENV{HOME}/.gtc-crypt/.key for reading: $!";
+ $key=<KEY>;
+ close(KEY);
+}
+# Generate a random key if it is not existing
+else {
+ my $i=1;
+ while ($i <= 32) {
+  $key=$key . int(rand(10));
+  $i++;
+ }
+ # write key to keyfile
+ open(KEY, ">$ENV{HOME}/.gtc-crypt/.key") || die "Could not open the keyfile $ENV{HOME}/.gtc-crypt/.key for writing: $!";
+ print KEY $key;
+ close(KEY);
+ chmod 0600, "$ENV{HOME}/.gtc-crypt/.key"
+}
+
+# Read the crypt file
+my @crypt;
+if (-f "$ENV{HOME}/.gtc-crypt/crypt") {
+ open(CRYPT, "<$ENV{HOME}/.gtc-crypt/crypt") || die "Could not open the cryptfile $ENV{HOME}/.gtc-crypt/crypt for reading: $!";
+ @crypt=<CRYPT>;
+ close(CRYPT);
+}
+
+# preparde en or decryption
+use Crypt::CBC -pbkdf;
+use MIME::Base64;
+my $cipher=new Crypt::CBC(-key => $key,
+-pbkdf => 'pbkdf2');
+#-nodeprecate => '1');
+
+# Decrypt the string and print it out if wished
+if (($opt_p) || ($opt_d)) {
+ my $decrypt;
+ foreach my $line (@crypt) {
+  if ($opt_d) {
+   my $name=$line;
+   $name=~s/\:.+$//;
+   print $name;
+  }
+  if ($line=~/^$alias\:/) {
+   chomp($line);
+   $decrypt=$line;
+   $decrypt=~s/^$alias\://;
+  }
+ }
+ if ($opt_p) {
+  die "Alias not found in cryptfile" unless $decrypt;
+  print $cipher->decrypt(decode_base64($decrypt));
+  print "\n" unless $opt_b;
+ }
+ exit 0;
+}
+
+my $cstring="";
+unless (($opt_p) || ($opt_r)) {
+ # Get the string
+ print "Please enter your string to encrypt: " unless $opt_b;
+ my $string=<STDIN>;
+ chomp($string);
+ die "ERROR: String is empty" unless ($string);
+ # Crypt it!
+ $cstring=encode_base64($cipher->encrypt($string));
+ # chomp($cstring);
+ $cstring=~s/\n//g;
+}
+
+# ==== Write to the cryptfile ====
+# Open the crypt file for writing
+open(CRYPT, ">$ENV{HOME}/.gtc-crypt/crypt") || die "Could not open the cryptfile $ENV{HOME}/.gtc-crypt/crypt for writing: $!";
+my $changed=0;
+foreach my $line (@crypt) {
+ chomp($line);
+ # Is the alias existing?
+ if ($line=~/^$alias\:/) {
+  # Remove / ignore alias if wanted
+  if ($opt_r) {
+   print "Removing Alias $alias\n";
+   $changed=1;
+   next;
+  }
+  # Shall the existing alias been overwritten?
+  else {
+   unless ($opt_b) {
+    print "A string for the alias $alias is already existing! Shall I overwrite it? [y/n] ";
+    my $yn=<STDIN>;
+    chomp($yn);
+    $line=$alias . ":" . $cstring if ($yn eq "y");
+   }
+   else {
+    $line=$alias . ":" . $cstring;
+   }
+   $changed=1;
+  }
+ }
+ # Write the line
+ print CRYPT $line . "\n" if $line;
+}
+# Write new line if the alias is new and should not be removed
+print CRYPT $alias . ":" . $cstring . "\n" unless (($changed) || ($opt_r));
+
+sub usage {
+ print "Overview:
+=========
+This is a small app for storing strings encrypted on your harddisk. E.g. for using passwords in scripts running without interaction in the background. It is not (very) save but maybe better then storing plain text passwords on the harddisk.
+
+Options:
+========
+-h\t\t-> This help/usage.
+-a alias\t-> The alias under which you store your string (No newlines, : or spaces supported).
+-p\t\t-> Print out the decrypted string for the given alias (needs -a).
+-r\t\t-> Remove the given alias (needs -a).
+-d\t\t-> Dump all existing aliases
+-b\t\t-> Batch mode\n";
+ exit 1;
+}
+
